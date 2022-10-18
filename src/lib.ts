@@ -173,8 +173,8 @@ export function format(n: number): string {
   return `${(n / 1000 ** order).toFixed(3)}${suffixes[order]}`;
 }
 
-export function formatTime(): string {
-  const date = new Date();
+export function formatTime(timestamp = Date.now()): string {
+  const date = new Date(timestamp);
   return `${date.getHours().toFixed(0).padStart(2, "0")}:${date
     .getMinutes()
     .toFixed(0)
@@ -182,4 +182,28 @@ export function formatTime(): string {
     .getMilliseconds()
     .toFixed(0)
     .padStart(3, "0")}`;
+}
+
+export async function tightSleepUntil(ns: NS, time: number): Promise<void> {
+  while (Date.now() < time) {
+    const delay = time - Date.now();
+    if (delay > 200) {
+      await ns.sleep(delay / 2);
+    } else {
+      await ns.sleep(0);
+    }
+  }
+}
+
+export async function helperMain(ns: NS, f: (target: string) => Promise<void>): Promise<void> {
+  if (ns.args[1] !== undefined) {
+    const startTime =
+      typeof ns.args[1] === "string" ? parseFloat(ns.args[1]) : (ns.args[1] as number);
+    await tightSleepUntil(ns, startTime);
+  }
+  // if (ns.args[0] === "phantasy") ns.tprint(`starting on ${ns.args[0]} at ${formatTime()}`);
+  await f(ns.args[0] as string);
+  // if (ns.args[0] === "phantasy") {
+  //   ns.tprint(`finished on ${ns.args[0]} at ${formatTime()}`);
+  // }
 }
