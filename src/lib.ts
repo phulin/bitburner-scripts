@@ -1,7 +1,11 @@
 import type { NS } from "@ns";
 
 // Assuming ascending array, get GLB for el.
-function binarySearch<T>(ar: T[], el: T, keyF: (x: T) => number) {
+export function binarySearch<T>(
+  ar: T[],
+  el: T,
+  keyF: (x: T) => number
+): number {
   let m = 0;
   let n = ar.length - 1;
   const key = keyF(el);
@@ -24,6 +28,9 @@ export class PQueue<T> {
   check(): void {
     for (let i = 0; i < this.#entries.length - 1; i++) {
       if (this.#entries[i][1] > this.#entries[i + 1][1]) {
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore
+        window.print(this.#entries.join("; "));
         throw "Consistency error!";
       }
     }
@@ -31,12 +38,14 @@ export class PQueue<T> {
 
   insert(element: T, priority: number): void {
     const entry: [T, number] = [element, priority];
-    const index = binarySearch(
-      this.#entries,
-      entry,
-      ([, priority]) => priority
+    const lubIndex = this.#entries.findIndex(
+      ([, otherPriority]) => priority < otherPriority
     );
-    this.#entries.splice(index + 1, 0, entry);
+    this.#entries.splice(
+      lubIndex === -1 ? this.#entries.length : lubIndex,
+      0,
+      entry
+    );
     this.check();
   }
 
@@ -52,8 +61,8 @@ export class PQueue<T> {
     return this.#entries.shift();
   }
 
-  next(): T | undefined {
-    return this.#entries[0][0];
+  peek(): [T, number] | undefined {
+    return this.#entries[0];
   }
 
   get entries(): [T, number][] {
@@ -165,12 +174,12 @@ export function nukeHosts(ns: NS, hosts: Iterable<string>): void {
   }
 }
 
-/**
- * @param {object} obj
- * @returns {number}
- */
-export function sumValues(obj: number[]): number {
-  return [...Object.values(obj)].reduce((x, y) => x + y);
+export function sum(array: number[]): number {
+  return array.reduce((s, x) => s + x, 0);
+}
+
+export function sumValues(obj: { [index: string]: number }): number {
+  return [...Object.values(obj)].reduce((x, y) => x + y, 0);
 }
 
 /**
