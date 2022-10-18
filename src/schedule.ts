@@ -263,8 +263,16 @@ export async function main(ns: NS): Promise<void> {
     );
 
     // Execute any tasks which are ready to go.
-    const next = scheduledTasks.peek();
-    while (next && next[1] - Date.now() < TIME_EPSILON) {
+    let next = scheduledTasks.peek();
+    // ns.print(
+    //   `now: ${Date.now().toFixed(0)} next task start: ${
+    //     next ? next[1].toFixed(0) : "none"
+    //   } deadline: ${next ? next[0].deadline.toFixed(0) : "none"}`
+    // );
+    while (
+      (next = scheduledTasks.peek()) &&
+      next[1] - Date.now() < TIME_EPSILON
+    ) {
       scheduledTasks.pop();
       const [{ taskType, threads, source, target }, startTime] = next;
       if (startTime - Date.now() < -TIME_EPSILON) {
@@ -306,7 +314,11 @@ export async function main(ns: NS): Promise<void> {
       }
       primaryTargets.splice(0, 0, forceTarget);
     }
-    ns.print(`selected targets ${primaryTargets}`);
+    ns.print(
+      `[${new Date()
+        .toISOString()
+        .slice(11, 19)}] selected targets ${primaryTargets}`
+    );
 
     const allProcesses = [...allHosts(ns)].map((host) => ns.ps(host)).flat();
     const skipTargets = allProcesses
@@ -348,7 +360,7 @@ export async function main(ns: NS): Promise<void> {
       for (const target of primaryTargets) {
         const hackTime = ns.getHackTime(target);
         const delay = 3 * round * TIME_EPSILON;
-        const weakenDeadline = Date.now() + delay;
+        const weakenDeadline = Date.now() + delay + 4 * hackTime;
         if (skipTargets.includes(target)) {
           // don't do anything
         } else if (needsSetup.includes(target)) {
@@ -413,21 +425,27 @@ export async function main(ns: NS): Promise<void> {
     }
 
     if (totalThreadsAvailable > 0) {
-      scheduler.run(TaskType.WEAKEN, totalThreadsAvailable, "joesguns", 0);
+      const deadline = Date.now() + ns.getWeakenTime("joesguns");
+      scheduler.run(
+        TaskType.WEAKEN,
+        totalThreadsAvailable,
+        "joesguns",
+        deadline
+      );
     }
 
     const nextTask = scheduledTasks.peek();
     if (!nextTask) {
       throw "Somehow ended up with no scheduled tasks. Yikes.";
     }
-    ns.print(`Now: ${Date.now()}`);
-    ns.print(scheduledTasks.entries.slice(0, 10).join("; "));
-    ns.print(
-      `sleeping for ${Math.max(
-        0,
-        Date.now() - nextTask[1] - TIME_EPSILON
-      ).toFixed(0)}`
-    );
-    await ns.sleep(Math.max(0, Date.now() - nextTask[1] - TIME_EPSILON));
+    // ns.print(`Now: ${Date.now()}`);
+    // ns.print(scheduledTasks.entries.slice(0, 10).join("; "));
+    // ns.print(
+    //   `sleeping for ${Math.max(
+    //     0,
+    //     Date.now() - nextTask[1] - TIME_EPSILON
+    //   ).toFixed(0)}`
+    // );
+    await ns.sleep(Math.max(0.001, Date.now() - nextTask[1] - TIME_EPSILON));
   }
 }
