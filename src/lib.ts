@@ -1,11 +1,7 @@
 import type { NS } from "@ns";
 
 // Assuming ascending array, get GLB for el.
-export function binarySearch<T>(
-  ar: T[],
-  el: T,
-  keyF: (x: T) => number
-): number {
+export function binarySearch<T>(ar: T[], el: T, keyF: (x: T) => number): number {
   let m = 0;
   let n = ar.length - 1;
   const key = keyF(el);
@@ -38,14 +34,8 @@ export class PQueue<T> {
 
   insert(element: T, priority: number): void {
     const entry: [T, number] = [element, priority];
-    const lubIndex = this.#entries.findIndex(
-      ([, otherPriority]) => priority < otherPriority
-    );
-    this.#entries.splice(
-      lubIndex === -1 ? this.#entries.length : lubIndex,
-      0,
-      entry
-    );
+    const lubIndex = this.#entries.findIndex(([, otherPriority]) => priority < otherPriority);
+    this.#entries.splice(lubIndex === -1 ? this.#entries.length : lubIndex, 0, entry);
     this.check();
   }
 
@@ -80,27 +70,15 @@ export function targetValue(ns: NS, target: string, potential = false): number {
   );
 }
 
-/**
- * @param {NS} ns
- */
 export function potentialValue(ns: NS, target: string): number {
   return targetValue(ns, target, true);
-  // const adjustmentFactor = ns.getServerSecurityLevel(target) / ns.getServerMinSecurityLevel(target);
-  // const hackEffect = Math.min(0.999, ns.hackAnalyze(target) * adjustmentFactor);
-  // const growTime = ns.getGrowTime(target) / adjustmentFactor;
-  // return hackEffect * ns.getServerMaxMoney(target) ** 1.1 /
-  // 	(ns.growthAnalyze(target, 1 / (1 - hackEffect), 1) * (growTime + 20 * TIME_EPSILON));
 }
 
 export function canHack(ns: NS, host: string): boolean {
   return ns.getServerRequiredHackingLevel(host) <= ns.getHackingLevel();
 }
 
-export function allHosts(
-  ns: NS,
-  host = "home",
-  visited = new Set<string>()
-): Set<string> {
+export function allHosts(ns: NS, host = "home", visited = new Set<string>()): Set<string> {
   visited.add(host);
   for (const nextHost of ns.scan(host)) {
     if (!visited.has(nextHost)) {
@@ -111,9 +89,7 @@ export function allHosts(
 }
 
 export function accessHosts(ns: NS): string[] {
-  return [...allHosts(ns, ns.getHostname(), new Set())].filter((host) =>
-    ns.hasRootAccess(host)
-  );
+  return [...allHosts(ns, ns.getHostname(), new Set())].filter((host) => ns.hasRootAccess(host));
 }
 
 export function hackableHosts(ns: NS): string[] {
@@ -182,17 +158,7 @@ export function sumValues(obj: { [index: string]: number }): number {
   return [...Object.values(obj)].reduce((x, y) => x + y, 0);
 }
 
-/**
- * @param {NS} ns
- * @param {string} host
- * @param {string[]} exclude
- * @returns {number}
- **/
-export function ramUsedByOthers(
-  ns: NS,
-  host: string,
-  exclude: string[]
-): number {
+export function ramUsedByOthers(ns: NS, host: string, exclude: string[]): number {
   let result = 0;
   for (const program of ns.ps(host)) {
     if (exclude.includes(program.filename)) continue;
@@ -201,12 +167,19 @@ export function ramUsedByOthers(
   return result;
 }
 
-/**
- * @param {number} n
- */
 export function format(n: number): string {
   const suffixes = [" ", "k", "M", "b", "T", "q"];
-  const order =
-    n === 0 ? 0 : Math.min(5, Math.floor(Math.log(n) / Math.log(1000)));
+  const order = n === 0 ? 0 : Math.min(5, Math.floor(Math.log(n) / Math.log(1000)));
   return `${(n / 1000 ** order).toFixed(3)}${suffixes[order]}`;
+}
+
+export function formatTime(): string {
+  const date = new Date();
+  return `${date.getHours().toFixed(0).padStart(2, "0")}:${date
+    .getMinutes()
+    .toFixed(0)
+    .padStart(2, "0")}:${date.getSeconds().toFixed(0).padStart(2, "0")}.${date
+    .getMilliseconds()
+    .toFixed(0)
+    .padStart(3, "0")}`;
 }
