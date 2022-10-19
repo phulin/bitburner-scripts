@@ -24,9 +24,9 @@ export class PQueue<T> {
   check(): void {
     for (let i = 0; i < this.#entries.length - 1; i++) {
       if (this.#entries[i][1] > this.#entries[i + 1][1]) {
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore
-        window.print(this.#entries.join("; "));
+        // // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // // @ts-ignore
+        // window.print(this.#entries.join("; "));
         throw "Consistency error!";
       }
     }
@@ -47,8 +47,8 @@ export class PQueue<T> {
     this.check();
   }
 
-  pop(): [T, number] | undefined {
-    return this.#entries.shift();
+  pop(n = 1): void {
+    this.#entries = this.#entries.slice(n);
   }
 
   peek(): [T, number] | undefined {
@@ -207,3 +207,22 @@ export async function helperMain(ns: NS, f: (target: string) => Promise<void>): 
   //   ns.tprint(`finished on ${ns.args[0]} at ${formatTime()}`);
   // }
 }
+
+// function solveGrow(base, money_lo, money_hi) {
+//   if (money_lo >= money_hi) {
+//     return 0;
+//   }
+
+//   let threads = 1000;
+//   let prev = threads;
+//   for (let i = 0; i < 30; ++i) {
+//     const factor = money_hi / Math.min(money_lo + threads, money_hi - 1);
+//     threads = Math.log(factor) / Math.log(base);
+//     if (Math.ceil(threads) == Math.ceil(prev)) {
+//       break;
+//     }
+//     prev = threads;
+//   }
+
+//   return Math.ceil(Math.max(threads, prev, 0));
+// }

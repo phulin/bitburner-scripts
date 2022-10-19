@@ -1,7 +1,6 @@
 import {
   accessHosts,
   allHosts,
-  formatTime,
   hackableHosts,
   nukeHosts,
   potentialValue,
@@ -11,7 +10,7 @@ import {
   tightSleepUntil,
 } from "./lib";
 
-const TIME_EPSILON = 100; // milliseconds
+const TIME_EPSILON = 150; // milliseconds
 
 const HACK_FRACTION = 0.5;
 
@@ -19,7 +18,7 @@ const MAX_BATCHES = 1000;
 
 const TARGET_THRESHOLD = 0.4;
 
-const SERVER_SIZE = 20;
+// const SERVER_SIZE = 20;
 
 enum TaskType {
   HACK,
@@ -96,9 +95,13 @@ function setupThreads(ns: NS, target: string, maxThreads: number) {
   }
 
   ns.print(`setting up ${target}: [${growThreads}, ${weakenThreads}]`);
+  const fullSuccess = weakenThreads === weakenThreadsNeeded && growThreads === growThreadsNeeded;
   return {
-    [TaskType.GROW]: growThreads,
-    [TaskType.WEAKEN]: weakenThreads,
+    fullSuccess,
+    threads: {
+      [TaskType.GROW]: growThreads,
+      [TaskType.WEAKEN]: weakenThreads,
+    },
   };
 }
 
@@ -141,21 +144,23 @@ function hackThreads(ns: NS, target: string, maxThreads: number) {
 function runTask(
   ns: NS,
   scheduledTasks: PQueue<Task>,
-  { threads, taskType, target, source, deadline }: Task,
+  runningTasks: PQueue<Task>,
+  task: Task,
   startTime: number
 ) {
-  const available = threadsAvailable(ns, source, scheduledTasks);
-  const delay = startTime - Date.now();
+  const { threads, taskType, target, source, deadline } = task;
+  // const available = threadsAvailable(ns, source, scheduledTasks);
+  // const delay = startTime - Date.now();
   // const runtime = timeNeeded(ns, taskType, target);
-  if (target === "phantasy") {
-    ns.tprint(
-      `running ${threads} ${
-        TASK_SCRIPTS[taskType]
-      } ${target} on ${source} (${available} avail) in ${delay.toFixed(
-        0
-      )} ms, deadline ${formatTime(deadline)} starting ${formatTime(startTime)}`
-    );
-  }
+  // if (target === "phantasy") {
+  //   ns.tprint(
+  //     `running ${threads} ${
+  //       TASK_SCRIPTS[taskType]
+  //     } ${target} on ${source} (${available} avail) in ${delay.toFixed(
+  //       0
+  //     )} ms, deadline ${formatTime(deadline)} starting ${formatTime(startTime)}`
+  //   );
+  // }
   uniqueNumber++;
   if (ns.exec(TASK_SCRIPTS[taskType], source, threads, target, startTime, uniqueNumber) === 0) {
     ns.print(
@@ -163,6 +168,8 @@ function runTask(
         ns.getServerMaxRam(source) - ns.getServerUsedRam(source)
       ).toFixed(0)}.`
     );
+  } else {
+    runningTasks.insert(task, deadline);
   }
 }
 
@@ -181,11 +188,13 @@ function allProcesses(ns: NS) {
 class Scheduler {
   ns: NS;
   scheduledTasks: PQueue<Task>;
+  runningTasks: PQueue<Task>;
   availableSources: [string, number][];
 
-  constructor(ns: NS, scheduledTasks: PQueue<Task>) {
+  constructor(ns: NS, scheduledTasks: PQueue<Task>, runningTasks: PQueue<Task>) {
     this.ns = ns;
     this.scheduledTasks = scheduledTasks;
+    this.runningTasks = runningTasks;
     this.availableSources = usefulHosts(ns)
       .map((source) => [source, threadsAvailable(ns, source, scheduledTasks)] as [string, number])
       .filter(([, threads]) => threads > 0);
@@ -212,7 +221,7 @@ class Scheduler {
       if (deadline - duration > Date.now()) {
         this.scheduledTasks.insert(task, deadline - duration);
       } else {
-        runTask(ns, this.scheduledTasks, task, Date.now());
+        runTask(ns, this.scheduledTasks, this.runningTasks, task, Date.now());
       }
       threads -= sourceThreads;
       entry[1] -= sourceThreads;
@@ -225,6 +234,13 @@ class Scheduler {
       );
     }
   }
+}
+
+function hostNeedsSetup(ns: NS, host: string) {
+  return (
+    ns.getServerSecurityLevel(host) > 1.1 * ns.getServerMinSecurityLevel(host) ||
+    ns.getServerMoneyAvailable(host) < 0.7 * ns.getServerMaxMoney(host)
+  );
 }
 
 function nukeAndSelectTargets(ns: NS) {
@@ -241,9 +257,9 @@ function nukeAndSelectTargets(ns: NS) {
     (host) => potentialValue(ns, host) > TARGET_THRESHOLD * bestPotentialValue
   );
   const bestCurrent = hosts
-    .filter((host) => host !== "n00dles")
+    .filter((host) => host !== "n00dles" && !hostNeedsSetup(ns, host))
     .sort((x, y) => -(targetValue(ns, x) - targetValue(ns, y)))[0];
-  if (!targets.includes(bestCurrent)) targets.push(bestCurrent);
+  if (bestCurrent && !targets.includes(bestCurrent)) targets.push(bestCurrent);
   return targets;
 }
 
@@ -257,39 +273,32 @@ type Task = {
 
 export async function main(ns: NS): Promise<void> {
   ns.disableLog("ALL");
-  window.print = ns.print;
   ns.tail();
   let lastStatus = 0;
 
   const forceTarget = ns.args[0];
   if (forceTarget) ns.print(`forcing target ${forceTarget}`);
 
-  // Weakens happen at most every 3 * TIME_EPSILON.
-  // key: host
-  // value: list of { type: event type, threads, target, startTime/endTime: Date.now-style mili value of START time }
   const scheduledTasks = new PQueue<Task>();
-
-  // for (const host of hackableHosts(ns)) {
-  // 	ns.print(`${host} ${targetValue(ns, host).toFixed(1)} ${potentialValue(ns, host).toFixed(1)}`);
-  // }
+  const runningTasks = new PQueue<Task>();
 
   while (true) {
     // Buy servers.
-    if (SERVER_SIZE > 0) {
-      while (
-        ns.getPlayer().money >= ns.getPurchasedServerCost(2 ** SERVER_SIZE) &&
-        ns.getPurchasedServers().length < ns.getPurchasedServerLimit()
-      ) {
-        const name = `foo${ns.getPurchasedServers().length}`;
-        if (ns.purchaseServer(name, 2 ** SERVER_SIZE) === "") {
-          ns.print(`bought server ${name}`);
-          for (const script of HACK_SCRIPTS) {
-            await ns.scp(script, name);
-          }
-          break;
-        }
-      }
-    }
+    // if (SERVER_SIZE > 0) {
+    //   while (
+    //     ns.getPlayer().money >= ns.getPurchasedServerCost(2 ** SERVER_SIZE) &&
+    //     ns.getPurchasedServers().length < ns.getPurchasedServerLimit()
+    //   ) {
+    //     const name = `foo${ns.getPurchasedServers().length}`;
+    //     if (ns.purchaseServer(name, 2 ** SERVER_SIZE) === "") {
+    //       ns.print(`bought server ${name}`);
+    //       for (const script of HACK_SCRIPTS) {
+    //         await ns.scp(script, name);
+    //       }
+    //       break;
+    //     }
+    //   }
+    // }
 
     let primaryTargets = new Set(nukeAndSelectTargets(ns));
     if (forceTarget && typeof forceTarget === "string") {
@@ -324,11 +333,7 @@ export async function main(ns: NS): Promise<void> {
       }
     }
 
-    const needsSetup = [...primaryTargets].filter(
-      (host) =>
-        ns.getServerSecurityLevel(host) > 1.1 * ns.getServerMinSecurityLevel(host) ||
-        ns.getServerMoneyAvailable(host) < 0.7 * ns.getServerMaxMoney(host)
-    );
+    const needsSetup = [...primaryTargets].filter((host) => hostNeedsSetup(ns, host));
 
     let totalThreadsAvailable = sum(
       sources.map((source) => threadsAvailable(ns, source, scheduledTasks))
@@ -336,7 +341,7 @@ export async function main(ns: NS): Promise<void> {
     // Don't schedule on the last target if we're doing less than 5% of total.
     const minThreads = Math.floor(totalThreadsAvailable * 0.05);
 
-    const scheduler = new Scheduler(ns, scheduledTasks);
+    const scheduler = new Scheduler(ns, scheduledTasks, runningTasks);
     let round = 0;
     let batch = 0;
 
@@ -355,7 +360,7 @@ export async function main(ns: NS): Promise<void> {
         if (skipTargets.includes(target)) {
           // don't do anything
         } else if (needsSetup.includes(target)) {
-          const threads = setupThreads(ns, target, totalThreadsAvailable);
+          const { fullSuccess, threads } = setupThreads(ns, target, totalThreadsAvailable);
           scheduler.run(TaskType.WEAKEN, threads[TaskType.WEAKEN], target, weakenDeadline);
           scheduler.run(
             TaskType.GROW,
@@ -364,7 +369,16 @@ export async function main(ns: NS): Promise<void> {
             weakenDeadline - TIME_EPSILON
           );
           totalThreadsAvailable -= threads[TaskType.WEAKEN] + threads[TaskType.GROW];
-          skipTargets.push(target);
+          if (
+            !fullSuccess ||
+            ns.getServerSecurityLevel(target) > 1.1 * ns.getServerMinSecurityLevel(target)
+          ) {
+            // if security is still low we can just HGW right after this GW.
+            skipTargets.push(target);
+          } else if (fullSuccess) {
+            const index = needsSetup.indexOf(target);
+            if (index !== -1) needsSetup.splice(index, 1);
+          }
         } else {
           const threads = hackThreads(ns, target, totalThreadsAvailable);
           scheduler.run(
@@ -394,7 +408,14 @@ export async function main(ns: NS): Promise<void> {
       round++;
     }
 
-    let next = scheduledTasks.peek();
+    // Clean up runningTasks.
+    const firstRunningIndex = runningTasks.entries.findIndex(
+      ([, deadline]) => Date.now() < deadline
+    );
+    runningTasks.pop(firstRunningIndex === -1 ? runningTasks.entries.length : firstRunningIndex);
+
+    const nextRunning = runningTasks.peek();
+    let nextScheduled = scheduledTasks.peek();
     const joeWeakenTime = ns.getWeakenTime("joesguns");
     const remainingTotalThreadsAvailable = sum(
       sources.map((source) => threadsAvailable(ns, source, scheduledTasks))
@@ -404,10 +425,11 @@ export async function main(ns: NS): Promise<void> {
       !allProcesses(ns).some(
         (process) => process.filename.includes("weaken.js") && process.args[0] === "joesguns"
       ) && // not if we're already weakening.
-      (!next || next[1] - Date.now() > joeWeakenTime + TIME_EPSILON)
+      (!nextScheduled || nextScheduled[1] - Date.now() > joeWeakenTime + TIME_EPSILON) &&
+      (!nextRunning || nextRunning[1] - Date.now() > joeWeakenTime + TIME_EPSILON)
     ) {
       const deadline = Date.now() + ns.getWeakenTime("joesguns");
-      scheduler.run(TaskType.WEAKEN, totalThreadsAvailable, "joesguns", deadline);
+      scheduler.run(TaskType.WEAKEN, remainingTotalThreadsAvailable, "joesguns", deadline);
     }
 
     // Recalculate start times for all scheduled tasks.
@@ -428,15 +450,18 @@ export async function main(ns: NS): Promise<void> {
     );
 
     // Execute any tasks which are ready to go.
-    next = scheduledTasks.peek();
+    nextScheduled = scheduledTasks.peek();
     // ns.print(
     //   `now: ${Date.now().toFixed(0)} next task start: ${
     //     next ? next[1].toFixed(0) : "none"
     //   } deadline: ${next ? next[0].deadline.toFixed(0) : "none"}`
     // );
-    while ((next = scheduledTasks.peek()) && next[1] - Date.now() < TIME_EPSILON) {
+    while (
+      (nextScheduled = scheduledTasks.peek()) &&
+      nextScheduled[1] - Date.now() < TIME_EPSILON
+    ) {
       scheduledTasks.pop();
-      const [task, startTime] = next;
+      const [task, startTime] = nextScheduled;
       const { taskType, target } = task;
       if (startTime - Date.now() < -TIME_EPSILON) {
         ns.print(
@@ -446,7 +471,7 @@ export async function main(ns: NS): Promise<void> {
         );
         continue;
       }
-      runTask(ns, scheduledTasks, task, startTime);
+      runTask(ns, scheduledTasks, runningTasks, task, startTime);
     }
   }
 }
