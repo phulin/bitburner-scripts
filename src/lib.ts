@@ -169,7 +169,8 @@ export function ramUsedByOthers(ns: NS, host: string, exclude: string[]): number
 
 export function format(n: number): string {
   const suffixes = [" ", "k", "M", "b", "T", "q"];
-  const order = n === 0 ? 0 : Math.min(5, Math.floor(Math.log(n) / Math.log(1000)));
+  const order =
+    n === 0 ? 0 : Math.min(5, Math.max(0, Math.floor(Math.log(Math.abs(n)) / Math.log(1000))));
   return `${(n / 1000 ** order).toFixed(3)}${suffixes[order]}`;
 }
 
@@ -226,3 +227,47 @@ export async function helperMain(ns: NS, f: (target: string) => Promise<void>): 
 
 //   return Math.ceil(Math.max(threads, prev, 0));
 // }
+
+/**
+ * Get the sequence of hosts to pass through to a given host.
+ * @param ns BitBurner namespace.
+ * @param target Host to find - can be any prefix string.
+ * @param current Starting host.
+ * @param last Last host visited, so we don't go backwards in the tree.
+ */
+export function findHost(
+  ns: NS,
+  target: string,
+  current = ns.getHostname(),
+  last: string | null = null
+): string[] | null {
+  if (current.startsWith(target)) return [current];
+  for (const next of ns.scan(current)) {
+    if (next === last) {
+      continue;
+    } else {
+      // ns.print(`${last} ${current} ${next}`);
+      const result = findHost(ns, target, next, current);
+      if (result) {
+        return [...result, current];
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Connect to a given host.
+ * @param ns BitBurner namespace.
+ * @param target Target host - can be any prefix string.
+ * @param current Starting host.
+ * @returns Whether operation succeeded.
+ */
+export function connectTo(ns: NS, target: string, current = ns.getHostname()): boolean {
+  const sequence = findHost(ns, target, current);
+  if (!sequence) return false;
+  for (const host of sequence.reverse().slice(1)) {
+    ns.singularity.connect(host);
+  }
+  return true;
+}

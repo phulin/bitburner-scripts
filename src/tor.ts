@@ -26,6 +26,7 @@ export async function main(ns: NS): Promise<void> {
       if (!ns.fileExists(program) && ns.getPlayer().money >= cost)
         ns.singularity.purchaseProgram(program);
     }
+
     await ns.sleep(1000);
   }
 }
