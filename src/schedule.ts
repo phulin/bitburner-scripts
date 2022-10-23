@@ -174,10 +174,16 @@ function runTask(
 }
 
 function usefulHosts(ns: NS) {
-  if (ns.getServerMaxRam("home") > 8192) {
-    return ["home", ...ns.getPurchasedServers()];
+  if (ns.getServerMaxRam("home") > 32768) {
+    return [
+      "home",
+      ...ns.getPurchasedServers(),
+      ...accessHosts(ns).filter((host) => ns.args.includes("hacknet") && host.includes("hacknet")),
+    ];
   } else {
-    return accessHosts(ns).filter((host) => !host.includes("hacknet"));
+    return accessHosts(ns).filter(
+      (host) => ns.args.includes("hacknet") || !host.includes("hacknet")
+    );
   }
 }
 
@@ -203,9 +209,13 @@ class Scheduler {
   run(taskType: TaskType, threads: number, target: string, deadline: number) {
     const ns = this.ns;
     const requested = threads;
-    ns.print(`scheduling ${threads} ${TaskType[taskType]} to ${target}`);
-
     const duration = timeNeeded(ns, taskType, target);
+
+    ns.print(
+      `scheduling ${threads} ${TaskType[taskType]} to ${target}, expected ${(
+        duration / 1000
+      ).toFixed(3)} s`
+    );
 
     for (const entry of this.availableSources) {
       if (threads <= 0) break;
@@ -414,22 +424,35 @@ export async function main(ns: NS): Promise<void> {
     );
     runningTasks.pop(firstRunningIndex === -1 ? runningTasks.entries.length : firstRunningIndex);
 
-    const nextRunning = runningTasks.peek();
-    let nextScheduled = scheduledTasks.peek();
     const joeWeakenTime = ns.getWeakenTime("joesguns");
     const remainingTotalThreadsAvailable = sum(
       sources.map((source) => threadsAvailable(ns, source, scheduledTasks))
     );
+    let interstitialThreads = 0;
+
+    // If we can fit some interstitial XP gain in, do it.
     if (
       remainingTotalThreadsAvailable > minThreads &&
       !allProcesses(ns).some(
         (process) => process.filename.includes("weaken.js") && process.args[0] === "joesguns"
-      ) && // not if we're already weakening.
-      (!nextScheduled || nextScheduled[1] - Date.now() > joeWeakenTime + TIME_EPSILON) &&
-      (!nextRunning || nextRunning[1] - Date.now() > joeWeakenTime + TIME_EPSILON)
+      )
     ) {
-      const deadline = Date.now() + ns.getWeakenTime("joesguns");
-      scheduler.run(TaskType.WEAKEN, remainingTotalThreadsAvailable, "joesguns", deadline);
+      for (const source of sources) {
+        const nextRunning = runningTasks.entries.find(([{ source: s }]) => source === s);
+        const nextScheduled = scheduledTasks.entries.find(([{ source: s }]) => source === s);
+        const threads = threadsAvailable(ns, source, scheduledTasks);
+        if (
+          threads > 0 &&
+          (!nextScheduled || nextScheduled[1] - Date.now() > joeWeakenTime + 2 * TIME_EPSILON) &&
+          (!nextRunning || nextRunning[1] - Date.now() > joeWeakenTime + 2 * TIME_EPSILON)
+        ) {
+          ns.exec(TASK_SCRIPTS[TaskType.WEAKEN], source, threads, "joesguns");
+          interstitialThreads += threads;
+        }
+      }
+    }
+    if (interstitialThreads > 0) {
+      ns.print(`scheduled ${interstitialThreads} interstital weaken for XP.`);
     }
 
     // Recalculate start times for all scheduled tasks.
@@ -450,7 +473,7 @@ export async function main(ns: NS): Promise<void> {
     );
 
     // Execute any tasks which are ready to go.
-    nextScheduled = scheduledTasks.peek();
+    let nextScheduled = scheduledTasks.peek();
     // ns.print(
     //   `now: ${Date.now().toFixed(0)} next task start: ${
     //     next ? next[1].toFixed(0) : "none"

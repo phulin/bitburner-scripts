@@ -30,7 +30,11 @@ export async function main(ns: NS): Promise<void> {
       ns.singularity.joinFaction(faction);
     }
     for (const [host, faction] of backdoorHosts) {
-      if (!ns.getPlayer().factions.includes(faction) && canHack(ns, host)) {
+      if (
+        !ns.getPlayer().factions.includes(faction) &&
+        canHack(ns, host) &&
+        !ns.getServer(host).backdoorInstalled
+      ) {
         if (!connectTo(ns, host)) throw `Failed to connect to ${host}.`;
         ns.tprint(`backdooring ${host} for access to ${faction}`);
         await ns.singularity.installBackdoor();

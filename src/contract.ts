@@ -40,6 +40,39 @@ function rshift(n: number, bits: number) {
   return n;
 }
 
+const changeCache = new Map<number[], Map<number, Map<number, number>>>();
+function makeChange(ns: NS, coins: number[], lastCoinIndex: number, sum: number) {
+  if (sum === 0) return 1;
+
+  const cached = changeCache.get(coins)?.get(sum)?.get(lastCoinIndex);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  let result = 0;
+  const lastCoin = coins[lastCoinIndex];
+  const maxLastCoins = Math.floor(sum / lastCoin);
+  for (let k = 0; k <= maxLastCoins; k++) {
+    result += makeChange(ns, coins, lastCoinIndex - 1, sum - k * lastCoin);
+  }
+
+  let changeCacheCoins = changeCache.get(coins);
+  if (changeCacheCoins === undefined) {
+    changeCacheCoins = new Map();
+    changeCache.set(coins, changeCacheCoins);
+  }
+
+  let changeCacheCoinsSum = changeCacheCoins.get(sum);
+  if (changeCacheCoinsSum === undefined) {
+    changeCacheCoinsSum = new Map();
+    changeCacheCoins.set(sum, changeCacheCoinsSum);
+  }
+
+  changeCacheCoinsSum.set(lastCoinIndex, result);
+
+  return result;
+}
+
 function findContracts(ns: NS, current = "home", last: string | null = null): [string, string[]][] {
   const contracts = ns.ls(current).filter((file) => file.endsWith(".cct"));
   if (contracts.length > 0) return [[current, contracts]];
@@ -61,7 +94,6 @@ class Solvers {
   }
 
   "Algorithmic Stock Trader I"(prices: number[]) {
-    this.ns.print(prices);
     let highestDiff = 0;
     let lowestPrice = Infinity;
     for (const price of prices) {
@@ -75,7 +107,6 @@ class Solvers {
   }
 
   "Array Jumping Game"(maxJumps: number[]) {
-    this.ns.print(maxJumps);
     const length = maxJumps.length;
     const endAccessibleFrom = new Array(length).fill(false);
     endAccessibleFrom[length - 1] = true;
@@ -89,8 +120,55 @@ class Solvers {
     return endAccessibleFrom[0] ? 1 : 0;
   }
 
+  "Array Jumping Game II"(maxJumps: number[]) {
+    const length = maxJumps.length;
+    const minJumpsFrom: number[] = new Array(length).fill(-1);
+    minJumpsFrom[length - 1] = 0;
+    for (let index = length - 2; index >= 0; index--) {
+      const maxJump = maxJumps[index];
+      const jumpable = minJumpsFrom.slice(index + 1, index + maxJump + 1);
+      if (jumpable.some((x) => x >= 0)) {
+        minJumpsFrom[index] = 1 + Math.min(...jumpable.filter((x) => x >= 0));
+      }
+    }
+    this.ns.print(minJumpsFrom);
+    return minJumpsFrom[0] >= 0 ? minJumpsFrom[0] : 0;
+  }
+
+  "Compression I: RLE Compression"(input: string) {
+    const components = [];
+
+    let runCharacter = input[0];
+    let runLength = 1;
+    for (const char of input.slice(1).split("")) {
+      if (runCharacter === char && runLength < 9) {
+        runLength++;
+      } else {
+        components.push(`${runLength}${runCharacter}`);
+        runCharacter = char;
+        runLength = 1;
+      }
+    }
+    components.push(`${runLength}${runCharacter}`);
+
+    return components.join("");
+  }
+
+  "Encryption I: Caesar Cipher"([encoded, leftShift]: [string, number]) {
+    const codes = encoded.split("").map((c) => c.charCodeAt(0));
+    const shifted = codes.map((code) => {
+      if (65 <= code && code <= 90) {
+        const position = code - 65;
+        return 65 + ((position + 26 - leftShift) % 26);
+      } else {
+        return code;
+      }
+    });
+    this.ns.print(shifted);
+    return String.fromCharCode(...shifted);
+  }
+
   "Find Largest Prime Factor"(n: number) {
-    this.ns.print(n);
     for (let k = Math.floor(Math.sqrt(n)) | 1; k >= 3; k -= 2) {
       if (n % k === 0) return k;
     }
@@ -99,15 +177,42 @@ class Solvers {
   }
 
   "HammingCodes: Encoded Binary to Integer"(data: string) {
-    const bits = data.split("").map((s: string) => parseInt(s));
-    const codeSize = Math.round(Math.log2(bits.length));
-    this.ns.print(`${bits} bits, ${codeSize} block size`);
-    this.ns.print(data);
-    return null;
+    const codedLength = data.length;
+    const bits = data.split("").map((c) => parseInt(c));
+    this.ns.print(bits.join(""));
+
+    let incorrectIndex = 0;
+    for (let k = 1; k < codedLength; k <<= 1) {
+      if ((sum(bits.filter((_, index) => index & k)) & 1) !== 0) {
+        // incorrect parity bit.
+        incorrectIndex |= k;
+      }
+    }
+
+    if (incorrectIndex !== 0) {
+      bits[incorrectIndex] = 1 - bits[incorrectIndex];
+    }
+    this.ns.print(incorrectIndex);
+    this.ns.print(bits.join(""));
+
+    const regularParityBits = Math.round(Math.log2(codedLength));
+    for (let k = 1 << (regularParityBits - 1); k >= 1; k >>= 1) {
+      bits.splice(k, 1);
+    }
+    bits.splice(0, 1);
+    this.ns.print(bits.join(""));
+
+    let result = 0;
+    bits.reverse();
+    for (let i = 0; i < bits.length; i++) {
+      result |= bits[i] << i;
+    }
+    this.ns.print(result);
+
+    return result;
   }
 
   "HammingCodes: Integer to Encoded Binary"(data: number) {
-    this.ns.print(data);
     const binaryLength = Math.floor(Math.log2(data + 0.001)) + 1;
     let regularParityBits;
     for (regularParityBits = 0; regularParityBits < 100; regularParityBits++) {
@@ -128,7 +233,7 @@ class Solvers {
 
     // compute parity bits
     for (let k = 1; k < codedLength; k <<= 1) {
-      bits[k] = sum(bits.filter((_, index) => index & k)) % 2;
+      bits[k] = sum(bits.filter((_, index) => index & k)) & 1;
     }
 
     bits[0] = sum(bits) % 2;
@@ -161,6 +266,28 @@ class Solvers {
     return result;
   }
 
+  // "Sanitize Parentheses in Expression"(s: string) {
+  // const componentOptions: string[][] = [];
+  // let running = 0;
+  // const lastComponentStart = 0;
+  // for (let k = 0; k < s.length; k++) {
+  //   if (s[k] === "(") running++;
+  //   else if (s[k] === ")") running--;
+
+  //   if (running < 0) {
+  //     // move past all subsequent close parens
+  //     while (k + 1 < s.length && s[k + 1] === ")") {
+  //       k++;
+  //       running--;
+  //     }
+
+  //     // now we have the choice of removing one from each run of close parens in the string so far
+  //     const unit = s.slice(lastComponentStart, k + 1);
+  //   }
+  // }
+  //   return null;
+  // }
+
   "Total Ways to Sum"(n: number) {
     const partitions = [
       1, 1, 2, 3, 5, 7, 11, 15, 22, 30, 42, 56, 77, 101, 135, 176, 231, 297, 385, 490, 627, 792,
@@ -170,8 +297,12 @@ class Solvers {
     return partitions[n] - 1;
   }
 
+  "Total Ways to Sum II"([sum, coins]: [number, number[]]) {
+    coins.sort();
+    return makeChange(this.ns, coins, coins.length - 1, sum);
+  }
+
   "Unique Paths in a Grid I"(data: [number, number]) {
-    this.ns.print(data);
     return binomial(data[0] + data[1] - 2, data[1] - 1);
   }
 
@@ -218,13 +349,12 @@ export async function main(ns: NS): Promise<void> {
       const type = ns.codingcontract.getContractType(contract, host);
       ns.print(`${host} ${contract} ${type}`);
       if (type in solvers) {
-        ns.print(`solving`);
+        const data = ns.codingcontract.getData(contract, host);
+        ns.print(`solving with data ${data}`);
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const solution: string | number | any[] | null = solvers[type](
-          ns.codingcontract.getData(contract, host)
-        );
+        const solution: string | number | any[] | null = solvers[type](data);
         if (solution !== null) {
           ns.print(`attempting ${solution}`);
           const result = ns.codingcontract.attempt(solution, contract, host, {

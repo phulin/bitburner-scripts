@@ -38,8 +38,35 @@ function equip(ns: NS) {
   }
 }
 
+function ascend(ns: NS) {
+  const goodAugments = ns.gang.getEquipmentNames().filter((equip) => {
+    const stats = ns.gang.getEquipmentStats(equip);
+    return (
+      ns.gang.getEquipmentType(equip) === "Augmentation" &&
+      ((stats.str ?? 0) > 0 || (stats.def ?? 0) > 0 || (stats.dex ?? 0) > 0 || (stats.agi ?? 0) > 0)
+    );
+  });
+  for (const member of ns.gang.getMemberNames()) {
+    const info = ns.gang.getMemberInformation(member);
+    if (
+      goodAugments.every((augment) => info.augmentations.includes(augment)) &&
+      info.task === "Train Combat" &&
+      info.earnedRespect < 0.01 * ns.gang.getGangInformation().respect
+    ) {
+      const strAscensionPointGain = ns.formulas.gang.ascensionPointsGain(info.str_exp);
+      const newStrMultiplier = ns.formulas.gang.ascensionMultiplier(
+        info.str_asc_points + strAscensionPointGain
+      );
+      if (newStrMultiplier - info.str_asc_mult > 2) {
+        ns.gang.ascendMember(member);
+      }
+    }
+  }
+}
+
 async function watch(ns: NS) {
   while (true) {
+    ascend(ns);
     equip(ns);
     await ns.sleep(2000);
   }

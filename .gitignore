@@ -1,3 +1,6 @@
 node_modules/
 dist/
 NetscriptDefinitions.d.ts
+.DS_Store
+bitburnerFiles.zip
+old-schedule.js
