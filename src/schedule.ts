@@ -1,10 +1,12 @@
 import {
   accessHosts,
   allHosts,
+  formatDuration,
   hackableHosts,
   nukeHosts,
   potentialValue,
   PQueue,
+  solveGrow,
   sum,
   targetValue,
   tightSleepUntil,
@@ -18,7 +20,7 @@ const MAX_BATCHES = 1000;
 
 const TARGET_THRESHOLD = 0.4;
 
-// const SERVER_SIZE = 20;
+const SERVER_PURCHASE_INTERVAL = 3 * 60 * 1000;
 
 enum TaskType {
   HACK,
@@ -61,9 +63,12 @@ function threadsAvailable(ns: NS, source: string, scheduledTasks: PQueue<Task>) 
 }
 
 function setupThreads(ns: NS, target: string, maxThreads: number) {
-  const moneyMultiplierNeeded =
-    ns.getServerMaxMoney(target) / Math.max(50, ns.getServerMoneyAvailable(target));
-  const growThreadsNeeded = Math.ceil(ns.growthAnalyze(target, moneyMultiplierNeeded, 1));
+  const growThreadsNeeded = solveGrow(
+    ns,
+    target,
+    ns.getServerMoneyAvailable(target),
+    ns.getServerMaxMoney(target)
+  );
   // ns.print(`grow needed ${growThreadsNeeded}`);
 
   const growSecurity = ns.growthAnalyzeSecurity(growThreadsNeeded);
@@ -105,15 +110,22 @@ function setupThreads(ns: NS, target: string, maxThreads: number) {
   };
 }
 
-function hackThreads(ns: NS, target: string, maxThreads: number) {
+function hackThreads(ns: NS, target: string, maxThreads: number, startingMoney: number) {
   // ns.print(`${threads} available`);
+  const player = ns.getPlayer();
+  const server = ns.getServer(target);
 
   const hackThreadsNeeded = ns.hackAnalyzeThreads(
     target,
     HACK_FRACTION * ns.getServerMoneyAvailable(target)
   );
   // ns.print(`${hackThreadsNeeded} hack`);
-  const growThreadsNeeded = ns.growthAnalyze(target, 1 / HACK_FRACTION, 1);
+  const growThreadsNeeded = solveGrow(
+    ns,
+    target,
+    (1 - HACK_FRACTION) * startingMoney,
+    server.moneyMax
+  );
 
   const hackSecurity =
     ns.hackAnalyzeSecurity(hackThreadsNeeded) + ns.growthAnalyzeSecurity(growThreadsNeeded);
@@ -135,9 +147,15 @@ function hackThreads(ns: NS, target: string, maxThreads: number) {
   // ns.print(`predicted grow ${(ns.getServerMoneyAvailable(target) - ns.hackAnalyze(target) * hackThreads) * ns.growthAnalyze()}`);
 
   return {
-    [TaskType.HACK]: hackThreads,
-    [TaskType.GROW]: growThreads,
-    [TaskType.WEAKEN]: weakenThreads,
+    endingMoney:
+      startingMoney *
+      (1 - hackThreads * ns.formulas.hacking.hackPercent(server, player)) *
+      ns.formulas.hacking.growPercent(server, growThreads, player, 1),
+    threads: {
+      [TaskType.HACK]: hackThreads,
+      [TaskType.GROW]: growThreads,
+      [TaskType.WEAKEN]: weakenThreads,
+    },
   };
 }
 
@@ -212,9 +230,9 @@ class Scheduler {
     const duration = timeNeeded(ns, taskType, target);
 
     ns.print(
-      `scheduling ${threads} ${TaskType[taskType]} to ${target}, expected ${(
-        duration / 1000
-      ).toFixed(3)} s`
+      `scheduling ${threads} ${TaskType[taskType]} to ${target}, expected ${formatDuration(
+        duration
+      )}`
     );
 
     for (const entry of this.availableSources) {
@@ -255,22 +273,29 @@ function hostNeedsSetup(ns: NS, host: string) {
 
 function nukeAndSelectTargets(ns: NS) {
   nukeHosts(ns, allHosts(ns));
-  const hosts = hackableHosts(ns).filter(
-    (host) => Number.isFinite(targetValue(ns, host)) && Number.isFinite(potentialValue(ns, host))
+  const allHostValues = hackableHosts(ns).map((host): [string, number, number] => [
+    host,
+    targetValue(ns, host),
+    potentialValue(ns, host),
+  ]);
+  const hosts = allHostValues.filter(
+    ([, target, potential]) => Number.isFinite(target) && Number.isFinite(potential)
   );
-  let sorted = hosts.sort((x, y) => -(potentialValue(ns, x) - potentialValue(ns, y)));
+
+  let sorted = hosts.sort(([, , potentialX], [, , potentialY]) => -(potentialX - potentialY));
   if (ns.getHackingLevel() > 100) {
-    sorted = sorted.filter((host) => host !== "n00dles");
+    sorted = sorted.filter(([host]) => host !== "n00dles");
   }
-  const bestPotentialValue = potentialValue(ns, sorted[0]);
+  const [, , bestPotentialValue] = sorted[0];
+
   const targets = sorted.filter(
-    (host) => potentialValue(ns, host) > TARGET_THRESHOLD * bestPotentialValue
+    ([, , potential]) => potential > TARGET_THRESHOLD * bestPotentialValue
   );
   const bestCurrent = hosts
-    .filter((host) => host !== "n00dles" && !hostNeedsSetup(ns, host))
-    .sort((x, y) => -(targetValue(ns, x) - targetValue(ns, y)))[0];
+    .filter(([host]) => host !== "n00dles" && !hostNeedsSetup(ns, host))
+    .sort(([, targetX], [, targetY]) => -(targetX - targetY))[0];
   if (bestCurrent && !targets.includes(bestCurrent)) targets.push(bestCurrent);
-  return targets;
+  return targets.map(([host]) => host);
 }
 
 type Task = {
@@ -286,29 +311,64 @@ export async function main(ns: NS): Promise<void> {
   ns.tail();
   let lastStatus = 0;
 
-  const forceTarget = ns.args[0];
+  let forceTarget: string | null = null;
+  let noBuy = false;
+  for (const arg of ns.args) {
+    if (arg === "nobuy") {
+      noBuy = true;
+    } else if (typeof arg === "string" && ns.serverExists(arg)) {
+      forceTarget = arg;
+    }
+  }
   if (forceTarget) ns.print(`forcing target ${forceTarget}`);
 
   const scheduledTasks = new PQueue<Task>();
   const runningTasks = new PQueue<Task>();
 
+  let lastServerPurchase = 0; // Timestamp of last purchase
+
   while (true) {
-    // Buy servers.
-    // if (SERVER_SIZE > 0) {
-    //   while (
-    //     ns.getPlayer().money >= ns.getPurchasedServerCost(2 ** SERVER_SIZE) &&
-    //     ns.getPurchasedServers().length < ns.getPurchasedServerLimit()
-    //   ) {
-    //     const name = `foo${ns.getPurchasedServers().length}`;
-    //     if (ns.purchaseServer(name, 2 ** SERVER_SIZE) === "") {
-    //       ns.print(`bought server ${name}`);
-    //       for (const script of HACK_SCRIPTS) {
-    //         await ns.scp(script, name);
-    //       }
-    //       break;
-    //     }
-    //   }
-    // }
+    // Every so often, buy the biggest server we can, starting with home ram size.
+    if (
+      !noBuy &&
+      Date.now() - lastServerPurchase > SERVER_PURCHASE_INTERVAL &&
+      ns.getPurchasedServers().length < ns.getPurchasedServerLimit()
+    ) {
+      const maximumRam = Math.max(
+        ...["home", ...ns.getPurchasedServers()].map((host) => ns.getServerMaxRam(host))
+      );
+      const minimumSize = Math.round(Math.log2(maximumRam));
+      let size;
+      let canPurchase = false;
+      for (size = 20; size >= minimumSize; size--) {
+        if (ns.getPlayer().money >= 3 * ns.getPurchasedServerCost(1 << size)) {
+          canPurchase = true;
+          break;
+        }
+      }
+      // ns.print(`trying to buy server, min size ${minimumSize}, size ${size}`);
+      while (
+        canPurchase &&
+        ns.getPlayer().money >= 3 * ns.getPurchasedServerCost(1 << size) &&
+        ns.getPurchasedServers().length < ns.getPurchasedServerLimit()
+      ) {
+        let name = "foo0";
+        for (let i = 0; i < ns.getPurchasedServerLimit(); i++) {
+          if (!ns.serverExists(`foo${i}`)) {
+            name = `foo${i}`;
+            break;
+          }
+        }
+        if (ns.purchaseServer(name, 1 << size) === "") {
+          ns.tprint(`Purchasing server ${name} with size ${1 << size} GB.`);
+          for (const script of ["/lib.js", ...HACK_SCRIPTS]) {
+            await ns.scp(script, name);
+          }
+          lastServerPurchase = Date.now();
+          break;
+        }
+      }
+    }
 
     let primaryTargets = new Set(nukeAndSelectTargets(ns));
     if (forceTarget && typeof forceTarget === "string") {
@@ -355,6 +415,8 @@ export async function main(ns: NS): Promise<void> {
     let round = 0;
     let batch = 0;
 
+    const predictedMoney: { [index: string]: number } = {};
+
     while (totalThreadsAvailable > minThreads && batch < MAX_BATCHES) {
       if ([...primaryTargets].every((host) => skipTargets.includes(host))) break;
       for (const target of primaryTargets) {
@@ -388,9 +450,17 @@ export async function main(ns: NS): Promise<void> {
           } else if (fullSuccess) {
             const index = needsSetup.indexOf(target);
             if (index !== -1) needsSetup.splice(index, 1);
+            predictedMoney[target] = ns.getServerMaxMoney(target);
           }
         } else {
-          const threads = hackThreads(ns, target, totalThreadsAvailable);
+          // if round > 0, we'll be at full already.
+          const startingMoney = predictedMoney[target] ?? ns.getServerMoneyAvailable(target);
+          const { endingMoney, threads } = hackThreads(
+            ns,
+            target,
+            totalThreadsAvailable,
+            startingMoney
+          );
           scheduler.run(
             TaskType.HACK,
             threads[TaskType.HACK],
@@ -404,12 +474,23 @@ export async function main(ns: NS): Promise<void> {
             weakenDeadline - TIME_EPSILON
           );
           scheduler.run(TaskType.WEAKEN, threads[TaskType.WEAKEN], target, weakenDeadline);
+          predictedMoney[target] = endingMoney;
           totalThreadsAvailable -=
             threads[TaskType.HACK] + threads[TaskType.GROW] + threads[TaskType.WEAKEN];
         }
 
+        // run any ready-to-go tasks.
+
+        const nextTask = scheduledTasks.peek();
+        if (nextTask && nextTask[1] - Date.now() < 5 * TIME_EPSILON) {
+          await tightSleepUntil(ns, Math.max(Date.now(), nextTask[1] - TIME_EPSILON));
+        }
+
+        // Execute any tasks which are ready to go.
+        runScheduledTasks(ns, scheduledTasks, runningTasks);
+
         batch++;
-        if (batch % 50 === 0) {
+        if (batch % 10 === 0) {
           await ns.sleep(0.001);
         }
         if (totalThreadsAvailable <= minThreads || batch >= MAX_BATCHES) break;
@@ -438,8 +519,12 @@ export async function main(ns: NS): Promise<void> {
       )
     ) {
       for (const source of sources) {
-        const nextRunning = runningTasks.entries.find(([{ source: s }]) => source === s);
-        const nextScheduled = scheduledTasks.entries.find(([{ source: s }]) => source === s);
+        const nextRunning = runningTasks.entries.find(
+          ([{ source: otherSource }]) => source === otherSource
+        );
+        const nextScheduled = scheduledTasks.entries.find(
+          ([{ source: otherSource }]) => source === otherSource
+        );
         const threads = threadsAvailable(ns, source, scheduledTasks);
         if (
           threads > 0 &&
@@ -464,7 +549,7 @@ export async function main(ns: NS): Promise<void> {
     if (nextTask && nextTask[1] - Date.now() < 5 * TIME_EPSILON) {
       await tightSleepUntil(ns, Math.max(Date.now(), nextTask[1] - TIME_EPSILON));
     } else {
-      await ns.sleep(5 * TIME_EPSILON);
+      await ns.sleep(3 * TIME_EPSILON);
     }
 
     // Recalculate start times for all scheduled tasks.
@@ -473,28 +558,44 @@ export async function main(ns: NS): Promise<void> {
     );
 
     // Execute any tasks which are ready to go.
-    let nextScheduled = scheduledTasks.peek();
-    // ns.print(
-    //   `now: ${Date.now().toFixed(0)} next task start: ${
-    //     next ? next[1].toFixed(0) : "none"
-    //   } deadline: ${next ? next[0].deadline.toFixed(0) : "none"}`
-    // );
-    while (
-      (nextScheduled = scheduledTasks.peek()) &&
-      nextScheduled[1] - Date.now() < TIME_EPSILON
-    ) {
-      scheduledTasks.pop();
-      const [task, startTime] = nextScheduled;
-      const { taskType, target } = task;
-      if (startTime - Date.now() < -TIME_EPSILON) {
-        ns.print(
-          `WARNING: Passed start time for ${TaskType[taskType]} ${target} by ${(
-            Date.now() - startTime
-          ).toFixed(0)} ms. Skipping.`
-        );
-        continue;
+    runScheduledTasks(ns, scheduledTasks, runningTasks);
+  }
+}
+
+function runScheduledTasks(ns: NS, scheduledTasks: PQueue<Task>, runningTasks: PQueue<Task>) {
+  let nextScheduled = scheduledTasks.peek();
+  while ((nextScheduled = scheduledTasks.peek()) && nextScheduled[1] - Date.now() < TIME_EPSILON) {
+    scheduledTasks.pop();
+    const [task] = nextScheduled;
+    const { taskType, target, deadline } = task;
+
+    // Recalculate start times for all scheduled tasks.
+    const updatedStartTime = deadline - timeNeeded(ns, taskType, target);
+
+    if (updatedStartTime - Date.now() < -TIME_EPSILON / 2) {
+      ns.print(
+        `WARNING: Passed start time for ${TaskType[taskType]} ${target} by ${(
+          Date.now() - updatedStartTime
+        ).toFixed(0)} ms. Skipping.`
+      );
+      if (taskType === TaskType.GROW) {
+        // Okay, we missed a grow. Have to cancel any corresponding hack.
+        // Hack comes TIME_EPSILON before grow, so cancel any hacks in range deadline + [-2E, 0]
+        for (let i = scheduledTasks.entries.length - 1; i >= 0; i--) {
+          const [{ taskType: otherTaskType, target: otherTarget, deadline: otherDeadline }] =
+            scheduledTasks.entries[i];
+          if (
+            otherTaskType === TaskType.HACK &&
+            otherTarget === target &&
+            deadline - 2 * TIME_EPSILON < otherDeadline &&
+            otherDeadline < deadline
+          ) {
+            scheduledTasks.entries.splice(i, 1);
+          }
+        }
       }
-      runTask(ns, scheduledTasks, runningTasks, task, startTime);
+      continue;
     }
+    runTask(ns, scheduledTasks, runningTasks, task, updatedStartTime);
   }
 }

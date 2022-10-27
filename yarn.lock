@@ -827,6 +827,11 @@ has@^1.0.3:
   dependencies:
     function-bind "^1.1.1"
 
+heapify@^0.6.0:
+  version "0.6.0"
+  resolved "https://registry.yarnpkg.com/heapify/-/heapify-0.6.0.tgz#d226094f57821c998dcbc5f2e7faab91fbcfe3fc"
+  integrity sha512-TeTASfpsbj7CndSUiFHHAcFLV1vbHkpBzoWT7Eonxq8Jxv5O0KQqv9P9sWF6h+R5vZ8126+pxB1EX8CZtOPduw==
+
 ignore@^4.0.6:
   version "4.0.6"
   resolved "https://registry.yarnpkg.com/ignore/-/ignore-4.0.6.tgz#750e3db5862087b4737ebac8207ffd1ef27b25fc"

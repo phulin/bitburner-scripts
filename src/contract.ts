@@ -73,6 +73,19 @@ function makeChange(ns: NS, coins: number[], lastCoinIndex: number, sum: number)
   return result;
 }
 
+function shift(s: string, shiftLetter: (code: number, index: number) => number) {
+  const codes = s.split("").map((c) => c.charCodeAt(0));
+  const shifted = codes.map((code, index) => {
+    if (65 <= code && code <= 90) {
+      const position = code - 65;
+      return 65 + ((position + 26 + shiftLetter(code, index)) % 26);
+    } else {
+      return code;
+    }
+  });
+  return shifted.map((code) => String.fromCharCode(code)).join("");
+}
+
 function findContracts(ns: NS, current = "home", last: string | null = null): [string, string[]][] {
   const contracts = ns.ls(current).filter((file) => file.endsWith(".cct"));
   if (contracts.length > 0) return [[current, contracts]];
@@ -155,17 +168,11 @@ class Solvers {
   }
 
   "Encryption I: Caesar Cipher"([encoded, leftShift]: [string, number]) {
-    const codes = encoded.split("").map((c) => c.charCodeAt(0));
-    const shifted = codes.map((code) => {
-      if (65 <= code && code <= 90) {
-        const position = code - 65;
-        return 65 + ((position + 26 - leftShift) % 26);
-      } else {
-        return code;
-      }
-    });
-    this.ns.print(shifted);
-    return String.fromCharCode(...shifted);
+    return shift(encoded, () => -leftShift);
+  }
+
+  "Encryption II: Vigenère Cipher"([message, key]: [string, string]) {
+    return shift(message, (_, index) => key.charCodeAt(index % key.length) - "A".charCodeAt(0));
   }
 
   "Find Largest Prime Factor"(n: number) {
@@ -266,6 +273,24 @@ class Solvers {
     return result;
   }
 
+  "Minimum Path Sum in a Triangle"(weights: number[][]) {
+    const minimumPaths: number[][] = weights.map((row) => new Array(row.length).fill(0));
+    minimumPaths[0][0] = weights[0][0];
+    for (let row = 1; row < weights.length; row++) {
+      for (let col = 0; col < weights[row].length; col++) {
+        minimumPaths[row][col] =
+          weights[row][col] +
+          Math.min(
+            minimumPaths[row - 1]?.[col] ?? Infinity,
+            minimumPaths[row - 1]?.[col - 1] ?? Infinity
+          );
+      }
+    }
+    this.ns.print(weights);
+    this.ns.print(minimumPaths);
+    return Math.min(...minimumPaths[minimumPaths.length - 1]);
+  }
+
   // "Sanitize Parentheses in Expression"(s: string) {
   // const componentOptions: string[][] = [];
   // let running = 0;
@@ -289,12 +314,8 @@ class Solvers {
   // }
 
   "Total Ways to Sum"(n: number) {
-    const partitions = [
-      1, 1, 2, 3, 5, 7, 11, 15, 22, 30, 42, 56, 77, 101, 135, 176, 231, 297, 385, 490, 627, 792,
-      1002, 1255, 1575, 1958, 2436, 3010, 3718, 4565, 5604, 6842, 8349, 10143, 12310, 14883, 17977,
-      21637, 26015, 31185, 37338, 44583, 53174, 63261, 75175, 89134, 105558, 124754, 147273, 173525,
-    ];
-    return partitions[n] - 1;
+    const coins = [...new Array(n).keys()].slice(1);
+    return makeChange(this.ns, coins, coins.length - 1, n);
   }
 
   "Total Ways to Sum II"([sum, coins]: [number, number[]]) {

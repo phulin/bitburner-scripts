@@ -1,4 +1,4 @@
-import type { NS } from "@ns";
+import type { NS } from "/NetscriptDefinitions";
 
 // Assuming ascending array, get GLB for el.
 export function binarySearch<T>(ar: T[], el: T, keyF: (x: T) => number): number {
@@ -19,11 +19,11 @@ export function binarySearch<T>(ar: T[], el: T, keyF: (x: T) => number): number 
 }
 
 export class PQueue<T> {
-  #entries: [T, number][] = [];
+  entries: [T, number][] = [];
 
   check(): void {
-    for (let i = 0; i < this.#entries.length - 1; i++) {
-      if (this.#entries[i][1] > this.#entries[i + 1][1]) {
+    for (let i = 0; i < this.entries.length - 1; i++) {
+      if (this.entries[i][1] > this.entries[i + 1][1]) {
         // // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // // @ts-ignore
         // window.print(this.#entries.join("; "));
@@ -34,29 +34,25 @@ export class PQueue<T> {
 
   insert(element: T, priority: number): void {
     const entry: [T, number] = [element, priority];
-    const lubIndex = this.#entries.findIndex(([, otherPriority]) => priority < otherPriority);
-    this.#entries.splice(lubIndex === -1 ? this.#entries.length : lubIndex, 0, entry);
+    const lubIndex = this.entries.findIndex(([, otherPriority]) => priority < otherPriority);
+    this.entries.splice(lubIndex === -1 ? this.entries.length : lubIndex, 0, entry);
     this.check();
   }
 
   prioritize(f: (element: T, priority: number) => number): void {
-    this.#entries.forEach((entry) => {
+    this.entries.forEach((entry) => {
       entry[1] = f(...entry);
     });
-    this.#entries.sort(([, x], [, y]) => x - y);
+    this.entries.sort(([, x], [, y]) => x - y);
     this.check();
   }
 
   pop(n = 1): void {
-    this.#entries = this.#entries.slice(n);
+    this.entries = this.entries.slice(n);
   }
 
   peek(): [T, number] | undefined {
-    return this.#entries[0];
-  }
-
-  get entries(): [T, number][] {
-    return [...this.#entries];
+    return this.entries[0];
   }
 }
 
@@ -174,6 +170,13 @@ export function format(n: number): string {
   return `${(n / 1000 ** order).toFixed(3)}${suffixes[order]}`;
 }
 
+export function formatDuration(durationMs: number): string {
+  const minutes = Math.floor(durationMs / 60000);
+  durationMs -= minutes * 60000;
+  const seconds = durationMs / 1000;
+  return minutes > 0 ? `${minutes}m${seconds.toFixed(3)}` : seconds.toFixed(3);
+}
+
 export function formatTime(timestamp = Date.now()): string {
   const date = new Date(timestamp);
   return `${date.getHours().toFixed(0).padStart(2, "0")}:${date
@@ -209,24 +212,31 @@ export async function helperMain(ns: NS, f: (target: string) => Promise<void>): 
   // }
 }
 
-// function solveGrow(base, money_lo, money_hi) {
-//   if (money_lo >= money_hi) {
-//     return 0;
-//   }
+export function solveGrow(
+  ns: NS,
+  target: string,
+  currentMoney: number,
+  targetMoney: number,
+  cores = 1
+): number {
+  const base = ns.formulas.hacking.growPercent(ns.getServer(target), 1, ns.getPlayer(), cores);
+  if (currentMoney >= targetMoney) {
+    return 0;
+  }
 
-//   let threads = 1000;
-//   let prev = threads;
-//   for (let i = 0; i < 30; ++i) {
-//     const factor = money_hi / Math.min(money_lo + threads, money_hi - 1);
-//     threads = Math.log(factor) / Math.log(base);
-//     if (Math.ceil(threads) == Math.ceil(prev)) {
-//       break;
-//     }
-//     prev = threads;
-//   }
+  let threads = 1000;
+  let prev = threads;
+  for (let i = 0; i < 30; ++i) {
+    const factor = targetMoney / Math.min(currentMoney + threads, targetMoney - 1);
+    threads = Math.log(factor) / Math.log(base);
+    if (Math.ceil(threads) == Math.ceil(prev)) {
+      break;
+    }
+    prev = threads;
+  }
 
-//   return Math.ceil(Math.max(threads, prev, 0));
-// }
+  return Math.ceil(Math.max(threads, prev, 0));
+}
 
 /**
  * Get the sequence of hosts to pass through to a given host.
@@ -270,4 +280,20 @@ export function connectTo(ns: NS, target: string, current = ns.getHostname()): b
     ns.singularity.connect(host);
   }
   return true;
+}
+
+export function time<T>(ns: NS, name: string, action: () => T): T {
+  const start = performance.now();
+  const result = action();
+  ns.print(`${name}: ${(performance.now() - start).toFixed(0)}ms`);
+  return result;
+}
+
+const marks: { [index: string]: number } = {};
+export function mark(name: string): void {
+  marks[name] = performance.now();
+}
+
+export function measure(ns: NS, name: string): void {
+  ns.print(`${name}: ${(performance.now() - marks[name]).toFixed(0)}ms`);
 }
